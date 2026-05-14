@@ -1,12 +1,5 @@
-import React, {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useState,
-} from "react";
+import React, { createContext, useCallback, useContext, useEffect, useState } from "react";
 import type { Session, User } from "@supabase/supabase-js";
-import { supabase } from "./supabase";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface AuthState {
@@ -29,15 +22,18 @@ function getAuthCallbackUrl() {
 
   const baseUrl = import.meta.env.BASE_URL ?? "/";
   const basePath =
-    baseUrl === "/" || baseUrl === "./"
-      ? ""
-      : `/${baseUrl.replace(/^\/+|\/+$/g, "")}`;
+    baseUrl === "/" || baseUrl === "./" ? "" : `/${baseUrl.replace(/^\/+|\/+$/g, "")}`;
 
   return `${window.location.origin}${basePath}/auth/callback`;
 }
 
 // ─── Context ──────────────────────────────────────────────────────────────────
 const AuthContext = createContext<AuthContextValue | null>(null);
+
+async function getSupabase() {
+  const { supabase } = await import("./supabase");
+  return supabase;
+}
 
 // ─── Provider ─────────────────────────────────────────────────────────────────
 export function AuthProvider({ children }: { children: React.ReactNode }) {
@@ -48,31 +44,55 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   });
 
   useEffect(() => {
-    // 初始化：取得現有 session（瀏覽器已保存的登入狀態）
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setState({
-        user: session?.user ?? null,
-        session,
-        isLoading: false,
-      });
-    });
+    let cancelled = false;
+    let unsubscribe: (() => void) | undefined;
 
-    // 監聽登入狀態變化（登入、登出、token 刷新）
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      setState({
-        user: session?.user ?? null,
-        session,
-        isLoading: false,
-      });
-    });
+    void getSupabase()
+      .then((supabase) => {
+        if (cancelled) return;
 
-    return () => subscription.unsubscribe();
+        // 初始化：取得現有 session（瀏覽器已保存的登入狀態）
+        supabase.auth.getSession().then(({ data: { session } }) => {
+          if (cancelled) return;
+
+          setState({
+            user: session?.user ?? null,
+            session,
+            isLoading: false,
+          });
+        });
+
+        // 監聽登入狀態變化（登入、登出、token 刷新）
+        const {
+          data: { subscription },
+        } = supabase.auth.onAuthStateChange((_event, session) => {
+          if (cancelled) return;
+
+          setState({
+            user: session?.user ?? null,
+            session,
+            isLoading: false,
+          });
+        });
+
+        unsubscribe = () => subscription.unsubscribe();
+      })
+      .catch((error) => {
+        console.error("[auth] 初始化失敗：", error);
+        if (!cancelled) {
+          setState({ user: null, session: null, isLoading: false });
+        }
+      });
+
+    return () => {
+      cancelled = true;
+      unsubscribe?.();
+    };
   }, []);
 
   // Google OAuth 登入：導向 Google 授權頁，完成後 redirect 回 /auth/callback
   const signInWithGoogle = useCallback(async () => {
+    const supabase = await getSupabase();
     const redirectTo = getAuthCallbackUrl();
 
     const { error } = await supabase.auth.signInWithOAuth({
@@ -93,6 +113,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const signOut = useCallback(async () => {
+    const supabase = await getSupabase();
     const { error } = await supabase.auth.signOut();
     if (error) {
       console.error("[auth] 登出失敗：", error.message);

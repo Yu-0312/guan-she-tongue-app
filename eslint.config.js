@@ -14,6 +14,7 @@ export default tseslint.config(
       ".workspace",
       ".wrangler",
       ".venv",
+      ".claude",
       "node_modules",
       "ml/data",
       "ml/models",

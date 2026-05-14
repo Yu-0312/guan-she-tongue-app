@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { supabase, type DailyCheckIn } from "@/lib/supabase";
+import type { DailyCheckIn } from "@/lib/supabase";
 import { useAuth } from "@/lib/auth-context";
 
 interface DailyCheckinState {
@@ -28,16 +28,18 @@ export function useDailyCheckin(): DailyCheckinState {
   const performCheckin = useCallback(async (userId: string) => {
     setState((prev) => ({ ...prev, isLoading: true }));
 
-    const today = new Date().toISOString().split("T")[0]; // "YYYY-MM-DD"
+    const today = getLocalDateKey();
 
     try {
+      const { supabase } = await import("@/lib/supabase");
+
       // 1. 查詢今天是否已經打卡
       const { data: existing } = await supabase
         .from("daily_check_ins")
         .select("*")
         .eq("user_id", userId)
         .eq("check_in_date", today)
-        .single();
+        .maybeSingle();
 
       if (existing) {
         // 今天已打卡，直接回傳現有記錄
@@ -51,13 +53,13 @@ export function useDailyCheckin(): DailyCheckinState {
       }
 
       // 2. 計算連續天數：查詢昨天是否有打卡
-      const yesterday = new Date(Date.now() - 86_400_000).toISOString().split("T")[0];
+      const yesterday = getLocalDateKey(addDays(new Date(), -1));
       const { data: yesterdayRecord } = await supabase
         .from("daily_check_ins")
         .select("streak_days")
         .eq("user_id", userId)
         .eq("check_in_date", yesterday)
-        .single();
+        .maybeSingle();
 
       const newStreak = yesterdayRecord ? yesterdayRecord.streak_days + 1 : 1;
 
@@ -119,7 +121,8 @@ export async function saveHealthRecord(
     constitutionType?: string;
   },
 ): Promise<{ recordId: string } | null> {
-  const today = new Date().toISOString().split("T")[0];
+  const { supabase } = await import("@/lib/supabase");
+  const today = getLocalDateKey();
 
   // ── 1. 上傳舌象圖片到 Supabase Storage ──────────────────────────────────
   let tongueImageUrl: string | null = null;
@@ -187,4 +190,18 @@ export async function saveHealthRecord(
   }
 
   return { recordId: record.id };
+}
+
+function getLocalDateKey(date = new Date()) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+
+  return `${year}-${month}-${day}`;
+}
+
+function addDays(date: Date, days: number) {
+  const next = new Date(date);
+  next.setDate(next.getDate() + days);
+  return next;
 }

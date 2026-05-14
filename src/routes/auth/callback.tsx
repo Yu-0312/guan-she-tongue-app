@@ -36,8 +36,7 @@ function AuthCallbackPage() {
 
           // 取得 login 前記錄的 returnTo 路徑（若有），否則回首頁
           const returnTo =
-            (typeof sessionStorage !== "undefined" &&
-              sessionStorage.getItem("auth:return_to")) ||
+            (typeof sessionStorage !== "undefined" && sessionStorage.getItem("auth:return_to")) ||
             "/";
           sessionStorage.removeItem("auth:return_to");
 

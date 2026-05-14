@@ -3,7 +3,7 @@ import { Link } from "@tanstack/react-router";
 import { LogIn, LogOut, Flame } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { useDailyCheckin } from "@/hooks/use-daily-checkin";
-import { LoginModal } from "./LoginModal";
+import { LazyLoginModal } from "./LazyLoginModal";
 
 export function SiteNav() {
   const { user, signOut, isLoading } = useAuth();
@@ -76,12 +76,14 @@ export function SiteNav() {
                   {user.user_metadata?.avatar_url ? (
                     <img
                       src={user.user_metadata.avatar_url as string}
-                      alt={user.user_metadata?.full_name as string ?? "用戶"}
+                      alt={(user.user_metadata?.full_name as string) ?? "用戶"}
                       className="h-8 w-8 rounded-full border border-border object-cover"
                     />
                   ) : (
                     <div className="flex h-8 w-8 items-center justify-center rounded-full border border-border bg-secondary text-xs font-medium text-foreground">
-                      {((user.user_metadata?.full_name as string) ?? user.email ?? "?")[0].toUpperCase()}
+                      {((user.user_metadata?.full_name as string) ??
+                        user.email ??
+                        "?")[0].toUpperCase()}
                     </div>
                   )}
                   {/* 今日已打卡綠點 */}
@@ -115,7 +117,7 @@ export function SiteNav() {
       </header>
 
       {/* 登入 Modal */}
-      <LoginModal open={loginModalOpen} onOpenChange={setLoginModalOpen} />
+      <LazyLoginModal open={loginModalOpen} onOpenChange={setLoginModalOpen} />
     </>
   );
 }

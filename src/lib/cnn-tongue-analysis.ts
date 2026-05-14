@@ -139,11 +139,13 @@ export function buildCnnTongueAnalysisRequest(capture: TongueCapture): CnnTongue
 export async function analyzeTongueCapture(
   capture: TongueCapture,
   fallback: TongueObservation,
+  options: { signal?: AbortSignal } = {},
 ): Promise<TongueModelAnalysis> {
   const endpoint = getCnnEndpoint();
   const response = await fetch(endpoint, {
     method: "POST",
     headers: { "content-type": "application/json" },
+    signal: options.signal,
     body: JSON.stringify(buildCnnTongueAnalysisRequest(capture)),
   });
 

@@ -1,6 +1,13 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { AlertTriangle, CalendarDays, CircleHelp, Cloud, CloudOff, ShieldAlert } from "lucide-react";
+import {
+  AlertTriangle,
+  CalendarDays,
+  CircleHelp,
+  Cloud,
+  CloudOff,
+  ShieldAlert,
+} from "lucide-react";
 import { SiteNav } from "@/components/SiteNav";
 import { Disclaimer } from "@/components/Disclaimer";
 import { LoginReminder, LoginModalTrigger } from "@/components/LoginReminder";
@@ -12,7 +19,11 @@ import {
   type TongueObservation,
 } from "@/lib/assessment";
 import { STORAGE_KEYS, loadJson } from "@/lib/app-storage";
-import { confidenceLabel, type TongueModelAnalysis } from "@/lib/cnn-tongue-analysis";
+import {
+  confidenceLabel,
+  type CnnTongueFeaturePrediction,
+  type TongueModelAnalysis,
+} from "@/lib/cnn-tongue-analysis";
 import { useAuth } from "@/lib/auth-context";
 import { saveHealthRecord } from "@/hooks/use-daily-checkin";
 
@@ -31,51 +42,88 @@ type SyncStatus = "idle" | "syncing" | "synced" | "error";
 
 function ResultsPage() {
   const { user } = useAuth();
-  const constitution = loadJson<ConstitutionResult>(STORAGE_KEYS.constitution);
-  const capture = loadJson<TongueCapture>(STORAGE_KEYS.tongueCapture);
-  const modelAnalysis = loadJson<TongueModelAnalysis>(STORAGE_KEYS.tongueModelAnalysis);
-  const observation =
-    loadJson<TongueObservation>(STORAGE_KEYS.tongueObservation) ??
-    defaultTongueObservation(constitution);
-  const report = buildTongueReport(observation, constitution);
-  const dateLabel = formatDate(observation.capturedAt);
-  const cautionCount = report.findings.filter((finding) => finding.level === "caution").length;
+  const [{ constitution, capture, modelAnalysis, observation }] = useState(() => {
+    const storedConstitution = loadJson<ConstitutionResult>(STORAGE_KEYS.constitution);
 
-  // ── 雲端同步狀態 ─────────────────────────────────────────────────────────
-  const [syncStatus, setSyncStatus] = useState<SyncStatus>("idle");
-  const hasSyncedRef = useRef(false); // 防止重複同步
-
-  useEffect(() => {
-    // 已登入 + 有分析資料 + 尚未同步 → 自動儲存至 Supabase
-    if (!user || hasSyncedRef.current) return;
-
-    hasSyncedRef.current = true;
-    setSyncStatus("syncing");
-
-    // modelAnalysis.predictions 是 Partial<Record<TongueFeatureKey, CnnTongueFeaturePrediction>>
+    return {
+      constitution: storedConstitution,
+      capture: loadJson<TongueCapture>(STORAGE_KEYS.tongueCapture),
+      modelAnalysis: loadJson<TongueModelAnalysis>(STORAGE_KEYS.tongueModelAnalysis),
+      observation:
+        loadJson<TongueObservation>(STORAGE_KEYS.tongueObservation) ??
+        defaultTongueObservation(storedConstitution),
+    };
+  });
+  const report = useMemo(
+    () => buildTongueReport(observation, constitution),
+    [constitution, observation],
+  );
+  const dateLabel = useMemo(() => formatDate(observation.capturedAt), [observation.capturedAt]);
+  const cautionCount = useMemo(
+    () => report.findings.filter((finding) => finding.level === "caution").length,
+    [report],
+  );
+  const syncPayload = useMemo(() => {
     const preds = modelAnalysis?.predictions;
-    const avgConfidence = preds
-      ? Object.values(preds).reduce((sum, p) => sum + (p?.confidence ?? 0), 0) /
-        Math.max(Object.keys(preds).length, 1)
-      : undefined;
+    const predictionValues: CnnTongueFeaturePrediction[] = preds
+      ? Object.values(preds).filter((prediction): prediction is CnnTongueFeaturePrediction =>
+          Boolean(prediction),
+        )
+      : [];
+    const avgConfidence =
+      predictionValues.length > 0
+        ? predictionValues.reduce((sum, prediction) => sum + prediction.confidence, 0) /
+          predictionValues.length
+        : undefined;
 
-    void saveHealthRecord(user.id, {
+    return {
       tongueImageBase64: capture?.dataUrl,
       tongueColor: preds?.bodyColor?.value ?? observation.bodyColor,
       coatingType: preds?.coatingColor?.value ?? observation.coatingColor,
       coatingThickness: preds?.coatingTexture?.value ?? observation.coatingTexture,
-      moisture: observation.center,   // center 為脾胃狀態，對應濕潤度
+      moisture: observation.center,
       cnnConfidence: avgConfidence,
       rawLogits: preds
         ? Object.fromEntries(
-            Object.entries(preds).map(([k, v]) => [k, v?.confidence ?? 0]),
+            Object.entries(preds).map(([key, prediction]) => [key, prediction?.confidence ?? 0]),
           )
         : undefined,
       constitutionType: constitution?.primary?.key,
-    }).then((result) => {
-      setSyncStatus(result ? "synced" : "error");
-    }).catch(() => setSyncStatus("error"));
-  }, [user, capture, modelAnalysis, observation, constitution]);
+    };
+  }, [capture, constitution, modelAnalysis, observation]);
+
+  // ── 雲端同步狀態 ─────────────────────────────────────────────────────────
+  const [syncStatus, setSyncStatus] = useState<SyncStatus>("idle");
+  const syncedUserRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!user?.id) {
+      syncedUserRef.current = null;
+      setSyncStatus("idle");
+      return;
+    }
+    if (syncedUserRef.current === user.id) return;
+
+    syncedUserRef.current = user.id;
+    setSyncStatus("syncing");
+    let cancelled = false;
+
+    void saveHealthRecord(user.id, syncPayload)
+      .then((result) => {
+        if (!cancelled) {
+          setSyncStatus(result ? "synced" : "error");
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setSyncStatus("error");
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [syncPayload, user?.id]);
 
   return (
     <div className="min-h-screen paper-grain">
@@ -272,13 +320,7 @@ function ResultsPage() {
 }
 
 // ── 同步狀態 Badge ──────────────────────────────────────────────────────────
-function SyncStatusBadge({
-  status,
-  isLoggedIn,
-}: {
-  status: SyncStatus;
-  isLoggedIn: boolean;
-}) {
+function SyncStatusBadge({ status, isLoggedIn }: { status: SyncStatus; isLoggedIn: boolean }) {
   if (!isLoggedIn) {
     return (
       <LoginModalTrigger reason="登入後，今日結果將自動儲存至雲端，建立長期健康記錄。">
