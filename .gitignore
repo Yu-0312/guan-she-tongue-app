@@ -1,0 +1,48 @@
+# Logs
+logs
+*.log
+*.py[cod]
+__pycache__/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+.env
+.env.*
+!.env.example
+
+node_modules
+dist
+dist-ssr
+.output
+.vinxi
+.tanstack/**
+.workspace/
+.nitro
+*.local
+
+# Wrangler / Cloudflare
+.wrangler/
+.dev.vars
+
+# ML datasets and training artifacts
+.venv/
+ml/data/
+ml/models/
+ml/runs/
+ml/checkpoints/
+ml/config/
+ml/outputs/
+ml/.env
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
