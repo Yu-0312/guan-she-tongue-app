@@ -1,4 +1,4 @@
-import { createClient } from "@supabase/supabase-js";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
 // ─── 環境變數 ────────────────────────────────────────────────────────────────
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string;
@@ -11,15 +11,29 @@ if (!supabaseUrl || !supabaseAnonKey) {
   );
 }
 
+function createServerSupabaseStub(): SupabaseClient {
+  return new Proxy(
+    {},
+    {
+      get() {
+        throw new Error("[supabase] Supabase client can only be used in the browser.");
+      },
+    },
+  ) as SupabaseClient;
+}
+
 // ─── Supabase Client ─────────────────────────────────────────────────────────
-export const supabase = createClient(supabaseUrl ?? "", supabaseAnonKey ?? "", {
-  auth: {
-    // 使用 localStorage 保存 session，讓用戶重新整理後不需重新登入
-    persistSession: true,
-    autoRefreshToken: true,
-    detectSessionInUrl: true, // 處理 Google OAuth redirect 的 hash/code
-  },
-});
+export const supabase: SupabaseClient =
+  typeof window === "undefined"
+    ? createServerSupabaseStub()
+    : createClient(supabaseUrl ?? "", supabaseAnonKey ?? "", {
+        auth: {
+          // 使用 localStorage 保存 session，讓用戶重新整理後不需重新登入
+          persistSession: true,
+          autoRefreshToken: true,
+          detectSessionInUrl: true, // 處理 Google OAuth redirect 的 hash/code
+        },
+      });
 
 // ─── Database 型別定義 ───────────────────────────────────────────────────────
 export interface DailyCheckIn {
