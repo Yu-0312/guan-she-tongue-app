@@ -33,6 +33,8 @@ jobs:
         run: bun run build
         env:
           VITE_ROUTER_BASEPATH: /guan-she-tongue-app/
+          VITE_SUPABASE_URL: https://wlrdidgrtkhgpypeqido.supabase.co
+          VITE_SUPABASE_ANON_KEY: sb_publishable_yI4n3j3lf5nsIg3StLUcOg_nLpCTJHK
 
       - name: Configure Pages
         uses: actions/configure-pages@v5
