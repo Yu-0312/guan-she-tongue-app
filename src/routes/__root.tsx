@@ -7,6 +7,8 @@ import {
   HeadContent,
   Scripts,
 } from "@tanstack/react-router";
+import { AuthProvider } from "@/lib/auth-context";
+import { useDailyCheckin } from "@/hooks/use-daily-checkin";
 
 import appCss from "../styles.css?url";
 
@@ -102,7 +104,19 @@ function RootComponent() {
   const { queryClient } = Route.useRouteContext();
   return (
     <QueryClientProvider client={queryClient}>
-      <Outlet />
+      <AuthProvider>
+        <DailyCheckinSync />
+        <Outlet />
+      </AuthProvider>
     </QueryClientProvider>
   );
+}
+
+/**
+ * 靜默執行每日打卡同步
+ * 用戶登入後自動在背景完成，不影響頁面 UI
+ */
+function DailyCheckinSync() {
+  useDailyCheckin();
+  return null;
 }

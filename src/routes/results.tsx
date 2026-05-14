@@ -1,7 +1,9 @@
+import { useEffect, useRef, useState } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { AlertTriangle, CalendarDays, CircleHelp, ShieldAlert } from "lucide-react";
+import { AlertTriangle, CalendarDays, CircleHelp, Cloud, CloudOff, ShieldAlert } from "lucide-react";
 import { SiteNav } from "@/components/SiteNav";
 import { Disclaimer } from "@/components/Disclaimer";
+import { LoginReminder, LoginModalTrigger } from "@/components/LoginReminder";
 import {
   buildTongueReport,
   defaultTongueObservation,
@@ -11,6 +13,8 @@ import {
 } from "@/lib/assessment";
 import { STORAGE_KEYS, loadJson } from "@/lib/app-storage";
 import { confidenceLabel, type TongueModelAnalysis } from "@/lib/cnn-tongue-analysis";
+import { useAuth } from "@/lib/auth-context";
+import { saveHealthRecord } from "@/hooks/use-daily-checkin";
 
 export const Route = createFileRoute("/results")({
   component: ResultsPage,
@@ -22,7 +26,11 @@ export const Route = createFileRoute("/results")({
   }),
 });
 
+// ── 同步狀態型別 ────────────────────────────────────────────────────────────
+type SyncStatus = "idle" | "syncing" | "synced" | "error";
+
 function ResultsPage() {
+  const { user } = useAuth();
   const constitution = loadJson<ConstitutionResult>(STORAGE_KEYS.constitution);
   const capture = loadJson<TongueCapture>(STORAGE_KEYS.tongueCapture);
   const modelAnalysis = loadJson<TongueModelAnalysis>(STORAGE_KEYS.tongueModelAnalysis);
@@ -32,6 +40,42 @@ function ResultsPage() {
   const report = buildTongueReport(observation, constitution);
   const dateLabel = formatDate(observation.capturedAt);
   const cautionCount = report.findings.filter((finding) => finding.level === "caution").length;
+
+  // ── 雲端同步狀態 ─────────────────────────────────────────────────────────
+  const [syncStatus, setSyncStatus] = useState<SyncStatus>("idle");
+  const hasSyncedRef = useRef(false); // 防止重複同步
+
+  useEffect(() => {
+    // 已登入 + 有分析資料 + 尚未同步 → 自動儲存至 Supabase
+    if (!user || hasSyncedRef.current) return;
+
+    hasSyncedRef.current = true;
+    setSyncStatus("syncing");
+
+    // modelAnalysis.predictions 是 Partial<Record<TongueFeatureKey, CnnTongueFeaturePrediction>>
+    const preds = modelAnalysis?.predictions;
+    const avgConfidence = preds
+      ? Object.values(preds).reduce((sum, p) => sum + (p?.confidence ?? 0), 0) /
+        Math.max(Object.keys(preds).length, 1)
+      : undefined;
+
+    void saveHealthRecord(user.id, {
+      tongueImageBase64: capture?.dataUrl,
+      tongueColor: preds?.bodyColor?.value ?? observation.bodyColor,
+      coatingType: preds?.coatingColor?.value ?? observation.coatingColor,
+      coatingThickness: preds?.coatingTexture?.value ?? observation.coatingTexture,
+      moisture: observation.center,   // center 為脾胃狀態，對應濕潤度
+      cnnConfidence: avgConfidence,
+      rawLogits: preds
+        ? Object.fromEntries(
+            Object.entries(preds).map(([k, v]) => [k, v?.confidence ?? 0]),
+          )
+        : undefined,
+      constitutionType: constitution?.primary?.key,
+    }).then((result) => {
+      setSyncStatus(result ? "synced" : "error");
+    }).catch(() => setSyncStatus("error"));
+  }, [user, capture, modelAnalysis, observation, constitution]);
 
   return (
     <div className="min-h-screen paper-grain">
@@ -77,6 +121,11 @@ function ResultsPage() {
               <span className="seal-stamp text-[0.7rem]">
                 {report.patternTags.slice(0, 2).join(" · ")}
               </span>
+            </div>
+
+            {/* ── 雲端同步狀態 ── */}
+            <div className="mt-4">
+              <SyncStatusBadge status={syncStatus} isLoggedIn={!!user} />
             </div>
             <div className="mt-5 grid grid-cols-2 gap-3 text-sm">
               <div className="rounded-lg bg-secondary/70 px-4 py-3">
@@ -215,8 +264,65 @@ function ResultsPage() {
         </div>
       </div>
       <Disclaimer variant="footer" />
+
+      {/* ── 未登入提醒條（固定於底部） ── */}
+      <LoginReminder reason="登入後，每日舌診結果將自動同步至雲端，追蹤健康趨勢。" />
     </div>
   );
+}
+
+// ── 同步狀態 Badge ──────────────────────────────────────────────────────────
+function SyncStatusBadge({
+  status,
+  isLoggedIn,
+}: {
+  status: SyncStatus;
+  isLoggedIn: boolean;
+}) {
+  if (!isLoggedIn) {
+    return (
+      <LoginModalTrigger reason="登入後，今日結果將自動儲存至雲端，建立長期健康記錄。">
+        {(open) => (
+          <button
+            onClick={open}
+            className="flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-muted-foreground/30 py-2.5 text-xs text-muted-foreground transition hover:border-primary/40 hover:text-primary"
+          >
+            <CloudOff size={13} />
+            訪客模式・點此登入以儲存雲端
+          </button>
+        )}
+      </LoginModalTrigger>
+    );
+  }
+
+  if (status === "syncing") {
+    return (
+      <div className="flex items-center gap-2 rounded-xl bg-secondary/60 px-3 py-2.5 text-xs text-muted-foreground">
+        <Cloud size={13} className="animate-pulse" />
+        正在同步至雲端……
+      </div>
+    );
+  }
+
+  if (status === "synced") {
+    return (
+      <div className="flex items-center gap-2 rounded-xl bg-green-500/10 px-3 py-2.5 text-xs text-green-600">
+        <Cloud size={13} />
+        已同步至雲端 ✓
+      </div>
+    );
+  }
+
+  if (status === "error") {
+    return (
+      <div className="flex items-center gap-2 rounded-xl bg-destructive/10 px-3 py-2.5 text-xs text-destructive">
+        <CloudOff size={13} />
+        同步失敗，資料保留在本機
+      </div>
+    );
+  }
+
+  return null;
 }
 
 function formatDate(value: string) {
