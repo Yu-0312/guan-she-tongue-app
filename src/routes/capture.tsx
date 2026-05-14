@@ -1,5 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AlertCircle, Camera, CheckCircle2, Loader2, WandSparkles } from "lucide-react";
 import { SiteNav } from "@/components/SiteNav";
 import { Disclaimer } from "@/components/Disclaimer";
@@ -31,6 +31,9 @@ export const Route = createFileRoute("/capture")({
 
 function CapturePage() {
   const inputRef = useRef<HTMLInputElement>(null);
+  const modelAbortRef = useRef<AbortController | null>(null);
+  const modelRequestRef = useRef(0);
+  const analyzeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [constitution] = useState<ConstitutionResult | null>(() =>
     loadJson<ConstitutionResult>(STORAGE_KEYS.constitution),
   );
@@ -50,6 +53,16 @@ function CapturePage() {
   const [modelAnalyzing, setModelAnalyzing] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
   const navigate = useNavigate();
+
+  useEffect(() => {
+    return () => {
+      modelRequestRef.current += 1;
+      modelAbortRef.current?.abort();
+      if (analyzeTimerRef.current) {
+        clearTimeout(analyzeTimerRef.current);
+      }
+    };
+  }, []);
 
   const onFile = async (file: File) => {
     setFileError(null);
@@ -101,7 +114,13 @@ function CapturePage() {
     if (modelAnalysis) {
       saveJson(STORAGE_KEYS.tongueModelAnalysis, modelAnalysis);
     }
-    setTimeout(() => navigate({ to: "/results" }), 900);
+    if (analyzeTimerRef.current) {
+      clearTimeout(analyzeTimerRef.current);
+    }
+    analyzeTimerRef.current = setTimeout(() => {
+      analyzeTimerRef.current = null;
+      navigate({ to: "/results" });
+    }, 900);
   };
 
   const setFeature = (feature: TongueFeatureKey, value: string) => {
@@ -112,17 +131,32 @@ function CapturePage() {
     nextCapture: TongueCapture,
     fallback: TongueObservation,
   ) => {
+    const requestId = modelRequestRef.current + 1;
+    modelRequestRef.current = requestId;
+    modelAbortRef.current?.abort();
+    const controller = new AbortController();
+    modelAbortRef.current = controller;
     setModelAnalyzing(true);
     try {
-      const analysis = await analyzeTongueCapture(nextCapture, fallback);
+      const analysis = await analyzeTongueCapture(nextCapture, fallback, {
+        signal: controller.signal,
+      });
+      if (requestId !== modelRequestRef.current) return;
+
       setModelAnalysis(analysis);
       setObservation(analysis.observation);
       saveJson(STORAGE_KEYS.tongueModelAnalysis, analysis);
       saveJson(STORAGE_KEYS.tongueObservation, analysis.observation);
     } catch (error) {
+      if (controller.signal.aborted || requestId !== modelRequestRef.current) return;
       setModelError(error instanceof Error ? error.message : "CNN API 無法完成分析");
     } finally {
-      setModelAnalyzing(false);
+      if (requestId === modelRequestRef.current) {
+        if (modelAbortRef.current === controller) {
+          modelAbortRef.current = null;
+        }
+        setModelAnalyzing(false);
+      }
     }
   };
 
@@ -306,8 +340,7 @@ function CapturePage() {
 async function normalizeTongueImage(
   file: File,
 ): Promise<{ dataUrl: string; width: number; height: number; sizeKb: number }> {
-  const dataUrl = await readFileAsDataUrl(file);
-  const image = await loadImage(dataUrl);
+  const image = await loadImageFromFile(file);
   const maxSide = 1280;
   const scale = Math.min(1, maxSide / Math.max(image.naturalWidth, image.naturalHeight));
   const width = Math.max(1, Math.round(image.naturalWidth * scale));
@@ -326,29 +359,55 @@ async function normalizeTongueImage(
   context.filter = "saturate(1.03) contrast(1.04) brightness(1.02)";
   context.drawImage(image, 0, 0, width, height);
 
-  const normalizedDataUrl = canvas.toDataURL("image/jpeg", 0.86);
+  const normalizedBlob = await canvasToBlob(canvas, "image/jpeg", 0.86);
+  const normalizedDataUrl = await blobToDataUrl(normalizedBlob);
+
   return {
     dataUrl: normalizedDataUrl,
     width,
     height,
-    sizeKb: Math.round((normalizedDataUrl.length * 3) / 4 / 1024),
+    sizeKb: Math.round(normalizedBlob.size / 1024),
   };
 }
 
-function readFileAsDataUrl(file: File): Promise<string> {
+function loadImageFromFile(file: File): Promise<HTMLImageElement> {
+  const src = URL.createObjectURL(file);
+
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => {
+      URL.revokeObjectURL(src);
+      resolve(image);
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(src);
+      reject(new Error("Image failed to load"));
+    };
+    image.src = src;
+  });
+}
+
+function canvasToBlob(canvas: HTMLCanvasElement, type: string, quality: number): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob(
+      (blob) => {
+        if (blob) {
+          resolve(blob);
+        } else {
+          reject(new Error("Canvas export failed"));
+        }
+      },
+      type,
+      quality,
+    );
+  });
+}
+
+function blobToDataUrl(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(String(reader.result));
     reader.onerror = () => reject(reader.error);
-    reader.readAsDataURL(file);
-  });
-}
-
-function loadImage(src: string): Promise<HTMLImageElement> {
-  return new Promise((resolve, reject) => {
-    const image = new Image();
-    image.onload = () => resolve(image);
-    image.onerror = () => reject(new Error("Image failed to load"));
-    image.src = src;
+    reader.readAsDataURL(blob);
   });
 }

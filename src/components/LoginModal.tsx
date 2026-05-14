@@ -64,8 +64,7 @@ export function LoginModal({ open, onOpenChange, reason }: LoginModalProps) {
             登入以儲存紀錄
           </DialogTitle>
           <DialogDescription className="mt-2 text-sm leading-relaxed text-muted-foreground">
-            {reason ??
-              "登入後，每日舌診結果將自動同步至雲端，隨時追蹤健康變化趨勢。"}
+            {reason ?? "登入後，每日舌診結果將自動同步至雲端，隨時追蹤健康變化趨勢。"}
           </DialogDescription>
         </DialogHeader>
 
@@ -103,9 +102,7 @@ export function LoginModal({ open, onOpenChange, reason }: LoginModalProps) {
           </Button>
 
           {/* 錯誤訊息 */}
-          {errorMsg && (
-            <p className="text-center text-xs text-destructive">{errorMsg}</p>
-          )}
+          {errorMsg && <p className="text-center text-xs text-destructive">{errorMsg}</p>}
 
           {/* 隱私說明 */}
           <p className="text-center text-[11px] leading-relaxed text-muted-foreground/70">

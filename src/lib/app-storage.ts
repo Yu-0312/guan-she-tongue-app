@@ -16,11 +16,36 @@ export function loadJson<T>(key: string): T | null {
   }
 }
 
-export function saveJson(key: string, value: unknown, storage: "local" | "session" = "local") {
-  if (typeof window === "undefined") return;
+export function saveJson(
+  key: string,
+  value: unknown,
+  storage: "local" | "session" = "local",
+): boolean {
+  if (typeof window === "undefined") return false;
 
+  const serialized = JSON.stringify(value);
   const target = storage === "local" ? window.localStorage : window.sessionStorage;
-  target.setItem(key, JSON.stringify(value));
+
+  try {
+    target.setItem(key, serialized);
+    if (storage === "session") {
+      window.localStorage.removeItem(key);
+    }
+    return true;
+  } catch (error) {
+    if (storage === "local") {
+      try {
+        window.localStorage.removeItem(key);
+        window.sessionStorage.setItem(key, serialized);
+        return true;
+      } catch {
+        // Fall through to the warning below.
+      }
+    }
+
+    console.warn("[storage] 無法儲存資料：", error);
+    return false;
+  }
 }
 
 export function removeStored(key: string) {

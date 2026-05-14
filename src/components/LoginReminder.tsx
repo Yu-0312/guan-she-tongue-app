@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { CloudOff, LogIn, X } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
-import { LoginModal } from "./LoginModal";
+import { LazyLoginModal } from "./LazyLoginModal";
 
 /**
  * 未登入提醒條（sticky banner）
@@ -55,7 +55,7 @@ export function LoginReminder({ reason }: { reason?: string }) {
       </div>
 
       {/* 登入 Modal */}
-      <LoginModal open={modalOpen} onOpenChange={setModalOpen} reason={reason} />
+      <LazyLoginModal open={modalOpen} onOpenChange={setModalOpen} reason={reason} />
     </>
   );
 }
@@ -74,7 +74,7 @@ export function LoginModalTrigger({
   return (
     <>
       {children(() => setModalOpen(true))}
-      <LoginModal open={modalOpen} onOpenChange={setModalOpen} reason={reason} />
+      <LazyLoginModal open={modalOpen} onOpenChange={setModalOpen} reason={reason} />
     </>
   );
 }
